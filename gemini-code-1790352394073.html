@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Tracker (Google Sheets DB)</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        .glass-card {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen pb-12">
+
+    <!-- 提示通知容器 -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <div class="p-6 max-w-7xl mx-auto space-y-6">
+        <!-- 頁頭與按鈕 -->
+        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-800 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold">Study Tracker</h1>
+                <p class="text-xs text-slate-400">已連結至你的 Google Sheet 試算表</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="openModal('modal-subject')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded-xl flex items-center gap-2">
+                    <i class="fa-solid fa-plus"></i> 新增科目
+                </button>
+                <button onclick="openModal('modal-assessment')" class="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl flex items-center gap-2">
+                    <i class="fa-solid fa-plus"></i> 新增作業/考試
+                </button>
+            </div>
+        </header>
+
+        <!-- 統計卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="glass-card p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400">預估 GPA</div>
+                <div id="stat-gpa" class="text-2xl font-extrabold text-indigo-400">N/A</div>
+            </div>
+            <div class="glass-card p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400">待完成考試</div>
+                <div id="stat-upcoming-exams" class="text-2xl font-extrabold text-amber-400">0</div>
+            </div>
+            <div class="glass-card p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400">待完成作業</div>
+                <div id="stat-pending-assignments" class="text-2xl font-extrabold text-emerald-400">0</div>
+            </div>
+        </div>
+
+        <!-- 成績圖表 -->
+        <div class="glass-card p-4 rounded-xl border border-slate-800 h-64">
+            <canvas id="chart-subject-grades"></canvas>
+        </div>
+
+        <!-- 科目卡片列表 -->
+        <div>
+            <h3 class="text-lg font-bold mb-3">我的科目</h3>
+            <div id="subjects-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+        </div>
+
+        <!-- 作業與考試列表 -->
+        <div class="glass-card rounded-xl border border-slate-800 overflow-hidden">
+            <div class="p-4 border-b border-slate-800 font-bold">作業與考試清單</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-900/50 text-slate-400">
+                        <tr>
+                            <th class="p-4">項目名稱</th>
+                            <th class="p-4">科目</th>
+                            <th class="p-4">類型</th>
+                            <th class="p-4">到期日</th>
+                            <th class="p-4">分數</th>
+                            <th class="p-4">狀態</th>
+                            <th class="p-4 text-right">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="assessments-tbody" class="divide-y divide-slate-800/50"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: 新增科目 -->
+    <div id="modal-subject" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+        <div class="glass-card p-6 rounded-2xl w-full max-w-md border border-slate-800">
+            <h3 class="text-lg font-bold mb-4">新增科目</h3>
+            <form id="form-subject" onsubmit="handleSaveSubject(event)" class="space-y-4">
+                <input type="hidden" id="subject-id">
+                <div>
+                    <label class="text-xs text-slate-400">科目名稱</label>
+                    <input type="text" id="subject-name" required class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs text-slate-400">目標分數 (%)</label>
+                        <input type="number" id="subject-target" value="85" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400">標籤顏色</label>
+                        <input type="color" id="subject-color" value="#6366f1" class="w-full h-10 bg-slate-900 border border-slate-800 rounded-xl p-1">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400">授課教師</label>
+                    <input type="text" id="subject-instructor" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-subject')" class="px-4 py-2 text-xs text-slate-400 hover:text-white">取消</button>
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded-xl">儲存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: 新增作業/考試 -->
+    <div id="modal-assessment" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+        <div class="glass-card p-6 rounded-2xl w-full max-w-md border border-slate-800">
+            <h3 class="text-lg font-bold mb-4">新增作業 / 考試</h3>
+            <form id="form-assessment" onsubmit="handleSaveAssessment(event)" class="space-y-4">
+                <input type="hidden" id="assessment-id">
+                <div>
+                    <label class="text-xs text-slate-400">項目名稱</label>
+                    <input type="text" id="assessment-title" required class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs text-slate-400">所屬科目</label>
+                        <select id="assessment-subject" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"></select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400">類型</label>
+                        <select id="assessment-type" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <option value="Assignment">作業 (Assignment)</option>
+                            <option value="Exam">考試 (Exam)</option>
+                            <option value="Project">專案 (Project)</option>
+                            <option value="Quiz">小考 (Quiz)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs text-slate-400">到期日期</label>
+                        <input type="date" id="assessment-date" required class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400">佔比權重 (%)</label>
+                        <input type="number" id="assessment-weight" value="10" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label class="text-xs text-slate-400">得分</label>
+                        <input type="number" id="assessment-score" placeholder="尚未公佈" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400">總分</label>
+                        <input type="number" id="assessment-max" value="100" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400">狀態</label>
+                        <select id="assessment-status" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <option value="Pending">未完成</option>
+                            <option value="Submitted">已繳交</option>
+                            <option value="Completed">已完成/已評分</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400">備註</label>
+                    <textarea id="assessment-notes" rows="2" class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-assessment')" class="px-4 py-2 text-xs text-slate-400 hover:text-white">取消</button>
+                    <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-xl">儲存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JavaScript 邏輯 -->
+    <script>
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbya_GNjnbsGr1hByUW6e83yK46830o-Z_hOfUJ90iF2g2XUs2O5DvXAYthSKp6ECRj3/exec";
+
+        window.appState = {
+            subjects: [],
+            assessments: [],
+            notes: []
+        };
+
+        let gradeChartInstance = null;
+
+        // UI 彈窗控制
+        window.openModal = function(id) { document.getElementById(id).classList.remove('hidden'); };
+        window.closeModal = function(id) { document.getElementById(id).classList.add('hidden'); };
+
+        // 從 Google Sheet 讀取資料
+        async function fetchFromSheets() {
+            try {
+                showToast("正在從 Google Sheet 載入資料...", "info");
+                const res = await fetch(GOOGLE_SCRIPT_URL);
+                const data = await res.json();
+                
+                window.appState.subjects = data.subjects || [];
+                window.appState.assessments = data.assessments || [];
+                window.appState.notes = data.notes || [];
+                
+                renderAllViews();
+                showToast("資料同步完成！", "success");
+            } catch (err) {
+                console.error("Fetch error:", err);
+                showToast("無法連接至 Google Sheet", "error");
+            }
+        }
+
+        // 發送資料至 Google Sheet
+        async function sendToSheets(action, data) {
+            try {
+                await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, data })
+                });
+                setTimeout(fetchFromSheets, 1200);
+            } catch (err) {
+                console.error("Save error:", err);
+                showToast("寫入 Google Sheet 失敗", "error");
+            }
+        }
+
+        // 新增/修改科目
+        window.handleSaveSubject = async function(e) {
+            e.preventDefault();
+            const id = document.getElementById('subject-id').value || 'sub_' + Date.now();
+            const name = document.getElementById('subject-name').value;
+            const targetGrade = document.getElementById('subject-target').value;
+            const color = document.getElementById('subject-color').value;
+            const instructor = document.getElementById('subject-instructor').value;
+
+            const subData = { id, name, targetGrade: Number(targetGrade), color, instructor, updatedAt: new Date().toISOString() };
+
+            const index = window.appState.subjects.findIndex(s => s.id === id);
+            if (index >= 0) window.appState.subjects[index] = subData;
+            else window.appState.subjects.push(subData);
+
+            renderAllViews();
+            closeModal('modal-subject');
+            document.getElementById('form-subject').reset();
+
+            await sendToSheets('saveSubject', subData);
+            showToast(`科目 "${name}" 已同步`, "success");
+        };
+
+        window.deleteSubject = async function(id) {
+            window.appState.subjects = window.appState.subjects.filter(s => s.id !== id);
+            renderAllViews();
+            await sendToSheets('deleteSubject', { id });
+            showToast("科目已刪除", "info");
+        };
+
+        // 新增/修改作業考試
+        window.handleSaveAssessment = async function(e) {
+            e.preventDefault();
+            const id = document.getElementById('assessment-id').value || 'ass_' + Date.now();
+            const title = document.getElementById('assessment-title').value;
+            const subjectId = document.getElementById('assessment-subject').value;
+            const type = document.getElementById('assessment-type').value;
+            const date = document.getElementById('assessment-date').value;
+            const weight = Number(document.getElementById('assessment-weight').value || 0);
+            const scoreVal = document.getElementById('assessment-score').value;
+            const maxVal = document.getElementById('assessment-max').value || 100;
+            const status = document.getElementById('assessment-status').value;
+            const notes = document.getElementById('assessment-notes').value;
+
+            const assData = {
+                id, title, subjectId, type, dueDate: date,
+                weightPercent: weight,
+                score: scoreVal !== "" ? Number(scoreVal) : null,
+                maxScore: Number(maxVal),
+                status, notes, updatedAt: new Date().toISOString()
+            };
+
+            const index = window.appState.assessments.findIndex(a => a.id === id);
+            if (index >= 0) window.appState.assessments[index] = assData;
+            else window.appState.assessments.push(assData);
+
+            renderAllViews();
+            closeModal('modal-assessment');
+            document.getElementById('form-assessment').reset();
+
+            await sendToSheets('saveAssessment', assData);
+            showToast(`項目 "${title}" 已同步`, "success");
+        };
+
+        window.deleteAssessment = async function(id) {
+            window.appState.assessments = window.appState.assessments.filter(a => a.id !== id);
+            renderAllViews();
+            await sendToSheets('deleteAssessment', { id });
+            showToast("項目已刪除", "info");
+        };
+
+        // 畫面渲染邏輯
+        function renderAllViews() {
+            populateSubjectDropdowns();
+            renderDashboard();
+            renderSubjects();
+            renderAssessments();
+        }
+
+        function populateSubjectDropdowns() {
+            const subjects = window.appState.subjects;
+            const el = document.getElementById('assessment-subject');
+            if (!el) return;
+            el.innerHTML = subjects.length ? '' : '<option value="">尚無科目</option>';
+            
+            subjects.forEach(sub => {
+                const opt = document.createElement('option');
+                opt.value = sub.id;
+                opt.textContent = sub.name;
+                el.appendChild(opt);
+            });
+        }
+
+        function renderDashboard() {
+            const assessments = window.appState.assessments;
+            const subjects = window.appState.subjects;
+
+            let totalWeightedPercent = 0;
+            let totalWeightCount = 0;
+
+            subjects.forEach(sub => {
+                const subAssessments = assessments.filter(a => a.subjectId === sub.id && a.score !== null && a.score !== "");
+                if (subAssessments.length > 0) {
+                    let subEarned = 0;
+                    let subMaxWeight = 0;
+                    subAssessments.forEach(a => {
+                        const pct = (Number(a.score) / Number(a.maxScore));
+                        subEarned += pct * (Number(a.weightPercent) || 10);
+                        subMaxWeight += (Number(a.weightPercent) || 10);
+                    });
+                    if (subMaxWeight > 0) {
+                        totalWeightedPercent += (subEarned / subMaxWeight) * 100;
+                        totalWeightCount++;
+                    }
+                }
+            });
+
+            const avgPct = totalWeightCount > 0 ? (totalWeightedPercent / totalWeightCount) : 0;
+            let gpa = 0.0;
+            if (avgPct >= 90) gpa = 4.0;
+            else if (avgPct >= 80) gpa = 3.5;
+            else if (avgPct >= 70) gpa = 3.0;
+            else if (avgPct >= 60) gpa = 2.5;
+            else if (avgPct > 0) gpa = 2.0;
+
+            document.getElementById('stat-gpa').innerText = totalWeightCount > 0 ? gpa.toFixed(2) : "N/A";
+            document.getElementById('stat-upcoming-exams').innerText = assessments.filter(a => a.status !== 'Completed' && (a.type === 'Exam' || a.type === 'Quiz')).length;
+            document.getElementById('stat-pending-assignments').innerText = assessments.filter(a => a.status !== 'Completed').length;
+
+            renderSubjectChart(subjects, assessments);
+        }
+
+        function renderSubjectChart(subjects, assessments) {
+            const ctx = document.getElementById('chart-subject-grades')?.getContext('2d');
+            if (!ctx) return;
+
+            const labels = subjects.map(s => s.name);
+            const dataScores = subjects.map(sub => {
+                const subA = assessments.filter(a => a.subjectId === sub.id && a.score !== null && a.score !== "");
+                if (!subA.length) return 0;
+                let earned = 0, weightSum = 0;
+                subA.forEach(a => {
+                    earned += (Number(a.score) / Number(a.maxScore)) * (Number(a.weightPercent) || 10);
+                    weightSum += (Number(a.weightPercent) || 10);
+                });
+                return weightSum > 0 ? ((earned / weightSum) * 100).toFixed(1) : 0;
+            });
+
+            if (gradeChartInstance) gradeChartInstance.destroy();
+
+            gradeChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels.length ? labels : ['無科目'],
+                    datasets: [{
+                        label: '平均分數 (%)',
+                        data: dataScores.length ? dataScores : [0],
+                        backgroundColor: subjects.map(s => s.color || '#6366f1'),
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        function renderSubjects() {
+            const container = document.getElementById('subjects-grid');
+            if (!container) return;
+            const subjects = window.appState.subjects;
+
+            if (subjects.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-center py-8 glass-card rounded-2xl border border-slate-800 text-slate-500">點擊右上角「新增科目」開始使用</div>`;
+                return;
+            }
+
+            container.innerHTML = subjects.map(sub => `
+                <div class="glass-card rounded-2xl p-5 border border-slate-800 flex flex-col justify-between space-y-4">
+                    <div class="flex justify-between items-start">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3.5 h-3.5 rounded-full" style="background-color: ${sub.color}"></span>
+                            <h4 class="text-base font-extrabold text-white">${escapeHtml(sub.name)}</h4>
+                        </div>
+                        <button onclick="deleteSubject('${sub.id}')" class="text-slate-500 hover:text-rose-400"><i class="fa-regular fa-trash-can"></i></button>
+                    </div>
+                    <div class="text-xs text-slate-400">授課教師: ${escapeHtml(sub.instructor || '未設定')}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderAssessments() {
+            const tbody = document.getElementById('assessments-tbody');
+            if (!tbody) return;
+            const filtered = window.appState.assessments;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-500">尚未新增作業或考試</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(a => {
+                const sub = window.appState.subjects.find(s => s.id === a.subjectId);
+                return `
+                    <tr class="hover:bg-slate-900/40 transition">
+                        <td class="p-4 font-semibold text-slate-200">${escapeHtml(a.title)}</td>
+                        <td class="p-4">${sub ? escapeHtml(sub.name) : '通用'}</td>
+                        <td class="p-4">${a.type}</td>
+                        <td class="p-4">${a.dueDate}</td>
+                        <td class="p-4">${a.score !== null && a.score !== "" ? a.score + ' / ' + a.maxScore : '-'}</td>
+                        <td class="p-4"><span class="px-2 py-1 rounded-full text-[10px] ${a.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">${a.status}</span></td>
+                        <td class="p-4 text-right">
+                            <button onclick="deleteAssessment('${a.id}')" class="text-slate-500 hover:text-rose-400 p-1.5"><i class="fa-regular fa-trash-can"></i></button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        window.showToast = function(msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-emerald-600' : type === 'error' ? 'bg-rose-600' : 'bg-indigo-600';
+            toast.className = `${bgClass} text-white px-4 py-3 rounded-xl shadow-xl text-xs font-semibold flex items-center gap-2 transition duration-300`;
+            toast.innerHTML = `<span>${escapeHtml(msg)}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        };
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchFromSheets();
+        });
+    </script>
+</body>
+</html>
